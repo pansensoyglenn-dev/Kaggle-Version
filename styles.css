@@ -1,0 +1,107 @@
+:root {
+  --bg: #0f1115;
+  --card: #181b22;
+  --line: #2a2f3a;
+  --text: #e8eaf0;
+  --muted: #9aa3b2;
+  --accent: #f5b942;
+  --accent-text: #1a1a1a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+}
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
+
+h1 { margin: 0 0 4px; font-size: 1.6rem; }
+h2 { margin: 28px 0 8px; font-size: 1.2rem; }
+.sub, .hint { color: var(--muted); margin: 0 0 20px; font-size: 0.95rem; }
+.hint { margin-top: 10px; }
+
+form, #result {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+#result { margin-top: 20px; }
+#result h2 { margin-top: 0; }
+
+label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+textarea, input, select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 16px;
+}
+
+textarea { resize: vertical; }
+#code1, #code2, #code3 { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+
+textarea:focus, input:focus, select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+}
+
+button, .btn {
+  display: inline-block;
+  padding: 12px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+form .primary { width: 100%; margin-top: 20px; }
+
+.actions { display: flex; gap: 10px; margin-top: 12px; }
+.actions > * { flex: 1; }
+
+.err { color: #ff8a80; margin: 0 0 14px; }
+
+.label-row { display: flex; align-items: flex-end; justify-content: space-between; margin-top: 14px; }
+.label-row label { margin: 0 0 6px; }
+.clear { padding: 6px 12px; font-size: 0.85rem; color: #ff8a80; margin-bottom: 6px; }
+
+.save-bar { margin-top: 20px; }
+.save-bar .primary { width: 100%; }
+.save-bar .hint { margin: 10px 0 0; text-align: center; }
