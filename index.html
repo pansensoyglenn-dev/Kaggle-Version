@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Prompt Builder</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <h1>Video Prompt Builder</h1>
+      <p class="sub">Type your prompts and tap Generate. You get two Colab cells: run Step 1, then Step 2 (GPU runtime).</p>
+    </header>
+
+    <p id="status" class="hint err" hidden></p>
+
+    <form id="form" autocomplete="off">
+      <div class="label-row">
+        <label for="prompt">Prompt</label>
+        <button type="button" class="clear" data-clear="prompt" aria-label="Clear prompt">✕ Clear</button>
+      </div>
+      <textarea id="prompt" rows="6" placeholder="Describe the scene..."></textarea>
+
+      <div class="label-row">
+        <label for="negative">Negative prompt</label>
+        <button type="button" class="clear" data-clear="negative" aria-label="Clear negative prompt">✕ Clear</button>
+      </div>
+      <textarea id="negative" rows="4" placeholder="What to avoid..."></textarea>
+
+      <div class="grid">
+        <div>
+          <label for="seed">Seed</label>
+          <input id="seed" type="number" value="42">
+        </div>
+        <div>
+          <label for="pick">Picture to animate</label>
+          <select id="pick">
+            <option value="0">Upload my own picture</option>
+            <option value="1" selected>Picture 1</option>
+            <option value="2">Picture 2</option>
+            <option value="3">Picture 3</option>
+          </select>
+        </div>
+        <div>
+          <label for="clips">Clips (≈3s each)</label>
+          <input id="clips" type="number" min="1" max="4" value="2">
+        </div>
+        <div>
+          <label for="motion">Motion (30–200)</label>
+          <input id="motion" type="number" min="30" max="200" value="90">
+        </div>
+      </div>
+
+      <label for="outname">Output file name</label>
+      <input id="outname" type="text" value="output_6s.mp4">
+
+      <label for="ntfy">Notification name (optional)</label>
+      <input id="ntfy" type="text" placeholder="for example glenn-video-7k2q">
+      <p class="hint">Install the free ntfy app and subscribe to this same name. You get a phone alert when the video is ready.</p>
+
+      <button type="submit" class="primary">Generate code</button>
+    </form>
+
+    <section id="result" hidden>
+      <h2>Step 1 — Keyframes</h2>
+      <p class="hint">Makes 3 images, then restarts the session on purpose to free RAM. A "session crashed" message is normal.</p>
+      <textarea id="code1" rows="10" readonly></textarea>
+      <div class="actions">
+        <button type="button" class="primary copy" data-target="code1" data-label="Copy Step 1">Copy Step 1</button>
+        <a class="btn" href="https://colab.research.google.com/#create=true" target="_blank" rel="noopener">Open Colab</a>
+      </div>
+
+      <h2>Step 2 — Animate</h2>
+      <p class="hint">Run after Step 1 finishes. Shows your pictures and asks which one to animate. Type 1, 2 or 3, or 0 to upload your own picture from your device. Press Enter to use the "Picture to animate" choice above.</p>
+      <textarea id="code2" rows="10" readonly></textarea>
+      <div class="actions">
+        <button type="button" class="primary copy" data-target="code2" data-label="Copy Step 2">Copy Step 2</button>
+      </div>
+
+      <p class="hint">Use Runtime → Change runtime type → GPU. Paste each step in its own cell.</p>
+
+      <h2>Kaggle: runs with the tab closed</h2>
+      <p class="hint">The instructions: One cell does everything. In Kaggle: Create, New Notebook. In the right panel set Accelerator to a GPU and Internet to On. Paste this code, tap Save Version, choose Save &amp; Run All, then  can close the page. The video appears in the version's Output files. To use the picture, choose "Upload my own picture" above and add the picture to the notebook with Add Input.</p>
+      <textarea id="code3" rows="10" readonly></textarea>
+      <div class="actions">
+        <button type="button" class="primary copy" data-target="code3" data-label="Copy Kaggle code">Copy Kaggle code</button>
+        <a class="btn" href="https://www.kaggle.com/code" target="_blank" rel="noopener">Open Kaggle</a>
+      </div>
+    </section>
+
+    <div class="save-bar">
+      <button type="button" id="save" class="primary">Save</button>
+      <p class="hint">Saves prompts and settings in this browser so they are still here next time.</p>
+    </div>
+  </main>
+  <script src="app.js"></script>
+  <script>
+    document.getElementById("form").addEventListener("submit", function (e) { e.preventDefault(); });
+    window.addEventListener("load", function () {
+      if (!window.__appLoaded) {
+        var s = document.getElementById("status");
+        s.textContent = "app.js did not load. Check it is named exactly app.js and sits next to index.html in the repo.";
+        s.hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>
