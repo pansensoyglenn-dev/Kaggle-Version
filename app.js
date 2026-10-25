@@ -11,7 +11,7 @@ function clamp(value, min, max, fallback) {
 
 function safeFileName(name) {
   const cleaned = name.trim().replace(/[^\w.\-]/g, "_");
-  if (!cleaned) return "output_6s.mp4";
+  if (!cleaned) return "output_realistic.mp4";
   return cleaned.toLowerCase().endsWith(".mp4") ? cleaned : cleaned + ".mp4";
 }
 
@@ -23,7 +23,12 @@ import torch
 from diffusers import StableDiffusionXLPipeline, DPMSolverMultistepScheduler, AutoencoderKL
 from IPython.display import display
 
-# Realism checkpoint
+assert torch.cuda.is_available(), "No GPU detected. In Colab: Runtime > Change runtime type > T4 GPU."
+vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+print(f"GPU: {torch.cuda.get_device_name(0)} ({vram_gb:.1f} GB)")
+if vram_gb < 14:
+    print("WARNING: less than 14 GB VRAM. Step 1 may be slow or OOM. A T4 (16 GB) is recommended.")
+
 MODEL_ID = "SG161222/RealVisXL_V5.0"
 
 prompt = ${py(v.prompt)}
@@ -32,7 +37,6 @@ SEED = ${v.seed}
 
 print("Loading VAE and RealVisXL Pipeline...")
 
-# Fixed VAE to prevent half-precision color corruption
 vae = AutoencoderKL.from_pretrained(
     "madebyollin/sdxl-vae-fp16-fix",
     torch_dtype=torch.float16,
@@ -47,13 +51,11 @@ sdxl = StableDiffusionXLPipeline.from_pretrained(
     low_cpu_mem_usage=True,
 )
 
-# Better scheduler for sharpness
 sdxl.scheduler = DPMSolverMultistepScheduler.from_config(
     sdxl.scheduler.config,
     use_karras_sigmas=True,
 )
 
-# Memory optimizations
 sdxl.enable_model_cpu_offload()
 sdxl.vae.enable_slicing()
 sdxl.vae.enable_tiling()
@@ -76,12 +78,14 @@ for i in range(3):
     print(f"Saved: {filename}")
     display(img.resize((672, 384)))
 
-# Free memory so Step 2 has room to load the video model
 del sdxl, vae
 gc.collect()
 torch.cuda.empty_cache()
 
 print("Done.")
+print("RECOMMENDED: before running Step 2, do Runtime > Restart runtime, then re-run Step 1's")
+print("pip/import lines only if Step 2 complains about memory. If Step 2 OOMs, restart and jump")
+print("straight to Step 2 — the PNGs are already saved.")
 `;
 }
 
@@ -100,12 +104,19 @@ from google.colab import files, drive
 from diffusers import StableVideoDiffusionPipeline
 from diffusers.utils import export_to_video
 
+assert torch.cuda.is_available(), "No GPU detected. In Colab: Runtime > Change runtime type > T4 GPU."
+vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+print(f"GPU: {torch.cuda.get_device_name(0)} ({vram_gb:.1f} GB)")
+
 SEED = ${v.seed}
 PICK = ${v.pick}
-N_CLIPS = ${v.clips}
+N_CLIPS = min(${v.clips}, 2)
 MOTION = ${v.motion}
 OUTPUT_NAME = ${py(v.outname)}
 NOTIFY_TOPIC = ${py(v.ntfy)}
+
+if ${v.clips} > 2:
+    print(f"N_CLIPS was ${v.clips}; capped to 2. Clips 3+ drift heavily and are usually unusable.")
 
 def notify(text):
     if not NOTIFY_TOPIC:
@@ -115,7 +126,6 @@ def notify(text):
     except Exception:
         pass
 
-# Show available images
 for n in (1, 2, 3):
     path = f"realistic_picture_{n}.png"
     if os.path.exists(path):
@@ -131,17 +141,25 @@ if PICK == 0:
     picture_path = list(uploaded.keys())[0]
 else:
     picture_path = f"realistic_picture_{PICK}.png"
+    if not os.path.exists(picture_path):
+        raise FileNotFoundError(f"{picture_path} not found. Please run Step 1 first, or enter 0 to upload.")
 
 print(f"Animating {picture_path}")
 keyframe = ImageOps.fit(Image.open(picture_path).convert("RGB"), (1024, 576))
 
 print("Loading Stable Video Diffusion...")
-svd = StableVideoDiffusionPipeline.from_pretrained(
-    "stabilityai/stable-video-diffusion-img2vid-xt",
-    torch_dtype=torch.float16,
-    variant="fp16",
-    low_cpu_mem_usage=True,
-)
+try:
+    svd = StableVideoDiffusionPipeline.from_pretrained(
+        "stabilityai/stable-video-diffusion-img2vid-xt",
+        torch_dtype=torch.float16,
+        variant="fp16",
+        low_cpu_mem_usage=True,
+    )
+except torch.cuda.OutOfMemoryError:
+    raise RuntimeError(
+        "Out of memory loading SVD. If you just ran Step 1, do Runtime > Restart runtime "
+        "and then re-run Step 2 alone. The PNGs are already on disk."
+    )
 svd.enable_model_cpu_offload()
 svd.unet.enable_forward_chunking()
 
@@ -151,16 +169,23 @@ current = keyframe
 for n in range(N_CLIPS):
     print(f"Animating clip {n + 1}/{N_CLIPS}...")
     g = torch.Generator("cpu").manual_seed(SEED + n)
-    out = svd(
-        current,
-        num_frames=25,
-        decode_chunk_size=2,
-        motion_bucket_id=MOTION,
-        noise_aug_strength=0.02,
-        fps=7,
-        generator=g,
-    ).frames[0]
-
+    try:
+        out = svd(
+            current,
+            num_frames=25,
+            decode_chunk_size=2,
+            motion_bucket_id=MOTION,
+            noise_aug_strength=0.05,
+            fps=7,
+            generator=g,
+        ).frames[0]
+    except torch.cuda.OutOfMemoryError:
+        gc.collect()
+        torch.cuda.empty_cache()
+        raise RuntimeError(
+            f"OOM on clip {n + 1}. Try Runtime > Restart runtime, then run Step 2 alone, "
+            "or lower MOTION / motion_bucket_id."
+        )
     all_frames += out if n == 0 else out[1:]
     current = out[-1]
 
@@ -170,14 +195,25 @@ del svd
 gc.collect()
 torch.cuda.empty_cache()
 
-print("Post-processing with FFmpeg...")
-!ffmpeg -y -loglevel error -i output_raw.mp4 \\
-  -vf "minterpolate=fps=24:mi_mode=mci:mc_mode=aobmc:vsbmc=1,scale=1280:720:flags=lanczos,eq=contrast=1.05:saturation=1.08" \\
-  -c:v libx264 -pix_fmt yuv420p -crf 18 {OUTPUT_NAME}
+print("Post-processing with FFmpeg (fast framerate doubling)...")
+vf = "framerate=fps=24,scale=1280:720:flags=lanczos,unsharp=5:5:0.6:5:5:0.3,eq=contrast=1.04:saturation=1.06"
+cmd = [
+    "ffmpeg", "-y", "-loglevel", "error", "-i", "output_raw.mp4",
+    "-vf", vf,
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", "medium",
+    OUTPUT_NAME,
+]
+try:
+    import subprocess
+    subprocess.run(cmd, check=True)
+    final_file = OUTPUT_NAME
+except Exception as e:
+    print(f"FFmpeg post-processing failed ({e}); falling back to raw video.")
+    final_file = "output_raw.mp4"
 
-notify("Your video is ready. Go back to Colab.")
-files.download(OUTPUT_NAME)
-print(f"Done! Video saved as: {OUTPUT_NAME}")
+notify(f"Your video is ready: {final_file}. Go back to Colab.")
+files.download(final_file)
+print(f"Done! Video saved as: {final_file}")
 
 try:
     drive.mount("/content/drive")
@@ -190,8 +226,8 @@ try:
     def save_video(_):
         with message:
             message.clear_output()
-            shutil.copy(OUTPUT_NAME, save_dir)
-            print(f"Saved to {save_dir}/{OUTPUT_NAME}")
+            shutil.copy(final_file, save_dir)
+            print(f"Saved to {save_dir}/{final_file}")
 
     button.on_click(save_video)
     display(button, message)
@@ -218,19 +254,26 @@ from diffusers import (
 )
 from diffusers.utils import export_to_video
 
-# Realism checkpoint
+assert torch.cuda.is_available(), "No GPU detected. In Kaggle: Settings > Accelerator > GPU T4 x2."
+vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+print(f"GPU: {torch.cuda.get_device_name(0)} ({vram_gb:.1f} GB)")
+
 MODEL_ID = "SG161222/RealVisXL_V5.0"
 
 prompt = ${py(v.prompt)}
 negative_prompt = ${py(v.negative)}
 SEED = ${v.seed}
 PICK = ${v.pick}
-N_CLIPS = ${v.clips}
+N_CLIPS = min(${v.clips}, 2)
 MOTION = ${v.motion}
 OUTPUT_NAME = ${py(v.outname)}
 NOTIFY_TOPIC = ${py(v.ntfy)}
 
+USE_UPLOADED_IMAGE = (PICK == 0)
 OUT_DIR = "/kaggle/working"
+
+if ${v.clips} > 2:
+    print(f"N_CLIPS was ${v.clips}; capped to 2. Clips 3+ drift heavily and are usually unusable.")
 
 
 def notify(text):
@@ -243,13 +286,17 @@ def notify(text):
 
 
 try:
-    if PICK == 0:
+    if USE_UPLOADED_IMAGE:
         found = []
         for ext in ("png", "jpg", "jpeg", "webp"):
             found += glob.glob(f"/kaggle/input/**/*.{ext}", recursive=True)
         if not found:
-            raise RuntimeError("No picture found in /kaggle/input. Add your picture to the notebook as an input.")
+            raise RuntimeError(
+                "No picture found in /kaggle/input. Add your picture via 'Add Data' "
+                "on the right sidebar, then re-run this cell."
+            )
         picture_path = found[0]
+        print(f"Using uploaded image: {picture_path}")
     else:
         print("Loading VAE and RealVisXL Pipeline...")
         vae = AutoencoderKL.from_pretrained(
@@ -297,12 +344,18 @@ try:
     keyframe = ImageOps.fit(Image.open(picture_path).convert("RGB"), (1024, 576))
 
     print("Loading Stable Video Diffusion...")
-    svd = StableVideoDiffusionPipeline.from_pretrained(
-        "stabilityai/stable-video-diffusion-img2vid-xt",
-        torch_dtype=torch.float16,
-        variant="fp16",
-        low_cpu_mem_usage=True,
-    )
+    try:
+        svd = StableVideoDiffusionPipeline.from_pretrained(
+            "stabilityai/stable-video-diffusion-img2vid-xt",
+            torch_dtype=torch.float16,
+            variant="fp16",
+            low_cpu_mem_usage=True,
+        )
+    except torch.cuda.OutOfMemoryError:
+        raise RuntimeError(
+            "OOM loading SVD. If the image-gen block just ran, stop this session and "
+            "start a fresh Kaggle session with USE_UPLOADED_IMAGE = True."
+        )
     svd.enable_model_cpu_offload()
     svd.unet.enable_forward_chunking()
 
@@ -311,15 +364,22 @@ try:
     for n in range(N_CLIPS):
         print(f"Animating clip {n + 1}/{N_CLIPS}...")
         g = torch.Generator("cpu").manual_seed(SEED + n)
-        out = svd(
-            current,
-            num_frames=25,
-            decode_chunk_size=2,
-            motion_bucket_id=MOTION,
-            noise_aug_strength=0.02,
-            fps=7,
-            generator=g,
-        ).frames[0]
+        try:
+            out = svd(
+                current,
+                num_frames=25,
+                decode_chunk_size=2,
+                motion_bucket_id=MOTION,
+                noise_aug_strength=0.05,
+                fps=7,
+                generator=g,
+            ).frames[0]
+        except torch.cuda.OutOfMemoryError:
+            gc.collect()
+            torch.cuda.empty_cache()
+            raise RuntimeError(
+                f"OOM on clip {n + 1}. In Kaggle, try a fresh session or lower MOTION."
+            )
         all_frames += out if n == 0 else out[1:]
         current = out[-1]
 
@@ -331,16 +391,23 @@ try:
     gc.collect()
     torch.cuda.empty_cache()
 
-    print("Post-processing with FFmpeg...")
-    subprocess.run([
-        "ffmpeg", "-y", "-loglevel", "error", "-i", raw_path,
-        "-vf", "minterpolate=fps=24:mi_mode=mci:mc_mode=aobmc:vsbmc=1,scale=1280:720:flags=lanczos,eq=contrast=1.05:saturation=1.08",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", final_path,
-    ], check=True)
-    os.remove(raw_path)
+    print("Post-processing with FFmpeg (fast framerate doubling)...")
+    vf = "framerate=fps=24,scale=1280:720:flags=lanczos,unsharp=5:5:0.6:5:5:0.3,eq=contrast=1.04:saturation=1.06"
+    try:
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error", "-i", raw_path,
+            "-vf", vf,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", "medium",
+            final_path,
+        ], check=True)
+        os.remove(raw_path)
+        final_msg = f"Video saved to {final_path}"
+    except Exception as e:
+        print(f"FFmpeg post-processing failed ({e}); keeping raw video.")
+        final_msg = f"Raw video saved to {raw_path}"
 
-    print(f"Done. Video saved to {final_path}")
-    notify("Your video is ready. Open the Kaggle notebook output to download it.")
+    print(f"Done. {final_msg}")
+    notify(f"Your video is ready. {final_msg}. Open the Kaggle notebook output to download it.")
 except Exception as e:
     notify(f"The video job failed: {e}")
     raise
@@ -355,7 +422,7 @@ $("form").addEventListener("submit", (e) => {
     prompt: $("prompt").value,
     negative: $("negative").value,
     seed: clamp($("seed").value, 0, 2147483647, 42),
-    clips: clamp($("clips").value, 1, 4, 2),
+    clips: clamp($("clips").value, 1, 2, 2),
     pick: clamp($("pick").value, 0, 3, 1),
     motion: clamp($("motion").value, 30, 200, 90),
     outname: safeFileName($("outname").value),
