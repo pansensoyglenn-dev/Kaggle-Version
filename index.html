@@ -43,8 +43,8 @@
           </select>
         </div>
         <div>
-          <label for="clips">Clips (≈3s each)</label>
-          <input id="clips" type="number" min="1" max="4" value="2">
+          <label for="clips">Clips (≈3s each, max 2)</label>
+          <input id="clips" type="number" min="1" max="2" value="2">
         </div>
         <div>
           <label for="motion">Motion (30–200)</label>
@@ -73,6 +73,7 @@
 
       <h2>Step 2 — Animate</h2>
       <p class="hint">Run after Step 1 finishes. Shows the pictures and asks which one to animate. Type 1, 2 or 3, or 0 to upload the picture from the device. Press Enter to use the "Picture to animate" choice above.</p>
+      <p class="hint warn">If Step 2 runs out of memory, do Runtime → Restart runtime, then run Step 2 alone. The keyframe images are already saved.</p>
       <textarea id="code2" rows="10" readonly></textarea>
       <div class="actions">
         <button type="button" class="primary copy" data-target="code2" data-label="Copy Step 2">Copy Step 2</button>
@@ -96,7 +97,6 @@
   </main>
   <script src="app.js"></script>
   <script>
-    document.getElementById("form").addEventListener("submit", function (e) { e.preventDefault(); });
     window.addEventListener("load", function () {
       if (!window.__appLoaded) {
         var s = document.getElementById("status");
