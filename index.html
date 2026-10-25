@@ -57,14 +57,14 @@
 
       <label for="ntfy">Notification name (optional)</label>
       <input id="ntfy" type="text" placeholder="for example glenn-video-7k2q">
-      <p class="hint">The free ntfy app and subscribe to get a phone alert when the video is ready.</p>
+      <p class="hint">Install the free ntfy app and subscribe to this name to get a phone alert when the video is ready.</p>
 
       <button type="submit" class="primary">Generate code</button>
     </form>
 
     <section id="result" hidden>
       <h2>Step 1 — Keyframes</h2>
-      <p class="hint">Makes 3 images, then restarts the session on purpose to free RAM. A "session crashed" message is normal.</p>
+      <p class="hint">Makes 3 realistic images with RealVisXL and frees memory when done. The first run downloads the model, so it takes a few minutes.</p>
       <textarea id="code1" rows="10" readonly></textarea>
       <div class="actions">
         <button type="button" class="primary copy" data-target="code1" data-label="Copy Step 1">Copy Step 1</button>
@@ -81,7 +81,7 @@
       <p class="hint">Use Runtime → Change runtime type → GPU. Paste each step in its own cell.</p>
 
       <h2>Kaggle: runs with the tab closed</h2>
-      <p class="hint">The instructions: One cell does everything. In Kaggle: Paste the generared code, tap Save Version, choose Save &amp; Run All, then  can close the page. The video appears in the version's Output files. To use the picture, choose "Upload the picture" above and add the picture to the notebook with Add Input.</p>
+      <p class="hint">One cell does everything. In Kaggle, turn Internet on in the notebook settings, paste the generated code, tap Save Version, choose Save &amp; Run All, then you can close the page. The video appears in the version's Output files. To use your own picture, choose "Upload the picture" above and add the picture to the notebook with Add Input.</p>
       <textarea id="code3" rows="10" readonly></textarea>
       <div class="actions">
         <button type="button" class="primary copy" data-target="code3" data-label="Copy Kaggle code">Copy Kaggle code</button>
