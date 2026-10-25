@@ -6,6 +6,9 @@
   --muted: #9aa3b2;
   --accent: #f5b942;
   --accent-text: #1a1a1a;
+  --warn: #f59e0b;
+  --warn-bg: #2a2213;
+  --warn-text: #fbbf24;
 }
 
 * { box-sizing: border-box; }
@@ -105,3 +108,12 @@ form .primary { width: 100%; margin-top: 20px; }
 .save-bar { margin-top: 20px; }
 .save-bar .primary { width: 100%; }
 .save-bar .hint { margin: 10px 0 0; text-align: center; }
+
+.hint.warn {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border-left: 3px solid var(--warn);
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 10px 0 14px;
+}
