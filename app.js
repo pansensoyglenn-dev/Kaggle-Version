@@ -18,39 +18,70 @@ function safeFileName(name) {
 function buildStep1(v) {
   return `!pip install -q diffusers transformers accelerate safetensors
 
-import os
+import gc
 import torch
-from diffusers import StableDiffusionXLPipeline
+from diffusers import StableDiffusionXLPipeline, DPMSolverMultistepScheduler, AutoencoderKL
 from IPython.display import display
+
+# Realism checkpoint
+MODEL_ID = "SG161222/RealVisXL_V5.0"
 
 prompt = ${py(v.prompt)}
 negative_prompt = ${py(v.negative)}
 SEED = ${v.seed}
 
-print("Loading SDXL...")
+print("Loading VAE and RealVisXL Pipeline...")
+
+# Fixed VAE to prevent half-precision color corruption
+vae = AutoencoderKL.from_pretrained(
+    "madebyollin/sdxl-vae-fp16-fix",
+    torch_dtype=torch.float16,
+)
+
 sdxl = StableDiffusionXLPipeline.from_pretrained(
-    "stabilityai/stable-diffusion-xl-base-1.0",
-    torch_dtype=torch.float16, variant="fp16", use_safetensors=True,
+    MODEL_ID,
+    vae=vae,
+    torch_dtype=torch.float16,
+    variant="fp16",
+    use_safetensors=True,
     low_cpu_mem_usage=True,
 )
-sdxl.enable_model_cpu_offload()
 
+# Better scheduler for sharpness
+sdxl.scheduler = DPMSolverMultistepScheduler.from_config(
+    sdxl.scheduler.config,
+    use_karras_sigmas=True,
+)
+
+# Memory optimizations
+sdxl.enable_model_cpu_offload()
+sdxl.vae.enable_slicing()
+sdxl.vae.enable_tiling()
+
+print("Generating realistic images...")
 for i in range(3):
     g = torch.Generator("cpu").manual_seed(SEED + i)
     img = sdxl(
         prompt=prompt,
         negative_prompt=negative_prompt,
-        width=1344, height=768,
-        num_inference_steps=30,
+        width=1344,
+        height=768,
+        num_inference_steps=28,
         guidance_scale=6.5,
         generator=g,
     ).images[0]
-    img.save(f"picture_{i + 1}.png")
-    print(f"Picture {i + 1}")
+
+    filename = f"realistic_picture_{i + 1}.png"
+    img.save(filename)
+    print(f"Saved: {filename}")
     display(img.resize((672, 384)))
 
-print("Done. The session will restart now, that is expected.")
-os.kill(os.getpid(), 9)
+# Free memory so Step 2 has room to load the video model
+del sdxl, vae
+gc.collect()
+torch.cuda.empty_cache()
+
+print("Done.")
 `;
 }
 
@@ -84,10 +115,12 @@ def notify(text):
     except Exception:
         pass
 
+# Show available images
 for n in (1, 2, 3):
-    if os.path.exists(f"picture_{n}.png"):
+    path = f"realistic_picture_{n}.png"
+    if os.path.exists(path):
         print(f"Picture {n}")
-        display(Image.open(f"picture_{n}.png").resize((672, 384)))
+        display(Image.open(path).resize((672, 384)))
 
 answer = input(f"Which picture do you want to animate? Type 1, 2 or 3, or 0 to upload your own (press Enter for {PICK}): ").strip()
 if answer in ("0", "1", "2", "3"):
@@ -97,7 +130,7 @@ if PICK == 0:
     uploaded = files.upload()
     picture_path = list(uploaded.keys())[0]
 else:
-    picture_path = f"picture_{PICK}.png"
+    picture_path = f"realistic_picture_{PICK}.png"
 
 print(f"Animating {picture_path}")
 keyframe = ImageOps.fit(Image.open(picture_path).convert("RGB"), (1024, 576))
@@ -105,7 +138,8 @@ keyframe = ImageOps.fit(Image.open(picture_path).convert("RGB"), (1024, 576))
 print("Loading Stable Video Diffusion...")
 svd = StableVideoDiffusionPipeline.from_pretrained(
     "stabilityai/stable-video-diffusion-img2vid-xt",
-    torch_dtype=torch.float16, variant="fp16",
+    torch_dtype=torch.float16,
+    variant="fp16",
     low_cpu_mem_usage=True,
 )
 svd.enable_model_cpu_offload()
@@ -113,9 +147,10 @@ svd.unet.enable_forward_chunking()
 
 all_frames = []
 current = keyframe
+
 for n in range(N_CLIPS):
     print(f"Animating clip {n + 1}/{N_CLIPS}...")
-    g = torch.manual_seed(SEED + n)
+    g = torch.Generator("cpu").manual_seed(SEED + n)
     out = svd(
         current,
         num_frames=25,
@@ -125,6 +160,7 @@ for n in range(N_CLIPS):
         fps=7,
         generator=g,
     ).frames[0]
+
     all_frames += out if n == 0 else out[1:]
     current = out[-1]
 
@@ -141,7 +177,7 @@ print("Post-processing with FFmpeg...")
 
 notify("Your video is ready. Go back to Colab.")
 files.download(OUTPUT_NAME)
-print("Done.")
+print(f"Done! Video saved as: {OUTPUT_NAME}")
 
 try:
     drive.mount("/content/drive")
@@ -174,8 +210,16 @@ import subprocess
 import requests
 import torch
 from PIL import Image, ImageOps
-from diffusers import StableDiffusionXLPipeline, StableVideoDiffusionPipeline
+from diffusers import (
+    StableDiffusionXLPipeline,
+    StableVideoDiffusionPipeline,
+    DPMSolverMultistepScheduler,
+    AutoencoderKL,
+)
 from diffusers.utils import export_to_video
+
+# Realism checkpoint
+MODEL_ID = "SG161222/RealVisXL_V5.0"
 
 prompt = ${py(v.prompt)}
 negative_prompt = ${py(v.negative)}
@@ -207,30 +251,45 @@ try:
             raise RuntimeError("No picture found in /kaggle/input. Add your picture to the notebook as an input.")
         picture_path = found[0]
     else:
-        print("Loading SDXL...")
+        print("Loading VAE and RealVisXL Pipeline...")
+        vae = AutoencoderKL.from_pretrained(
+            "madebyollin/sdxl-vae-fp16-fix",
+            torch_dtype=torch.float16,
+        )
         sdxl = StableDiffusionXLPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-xl-base-1.0",
-            torch_dtype=torch.float16, variant="fp16", use_safetensors=True,
+            MODEL_ID,
+            vae=vae,
+            torch_dtype=torch.float16,
+            variant="fp16",
+            use_safetensors=True,
             low_cpu_mem_usage=True,
         )
+        sdxl.scheduler = DPMSolverMultistepScheduler.from_config(
+            sdxl.scheduler.config,
+            use_karras_sigmas=True,
+        )
         sdxl.enable_model_cpu_offload()
+        sdxl.vae.enable_slicing()
+        sdxl.vae.enable_tiling()
 
+        print("Generating realistic images...")
         for i in range(3):
             g = torch.Generator("cpu").manual_seed(SEED + i)
             img = sdxl(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
-                width=1344, height=768,
-                num_inference_steps=30,
+                width=1344,
+                height=768,
+                num_inference_steps=28,
                 guidance_scale=6.5,
                 generator=g,
             ).images[0]
-            img.save(f"{OUT_DIR}/picture_{i + 1}.png")
+            img.save(f"{OUT_DIR}/realistic_picture_{i + 1}.png")
             print(f"Picture {i + 1} saved")
 
-        picture_path = f"{OUT_DIR}/picture_{PICK}.png"
+        picture_path = f"{OUT_DIR}/realistic_picture_{PICK}.png"
 
-        del sdxl
+        del sdxl, vae
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -240,7 +299,8 @@ try:
     print("Loading Stable Video Diffusion...")
     svd = StableVideoDiffusionPipeline.from_pretrained(
         "stabilityai/stable-video-diffusion-img2vid-xt",
-        torch_dtype=torch.float16, variant="fp16",
+        torch_dtype=torch.float16,
+        variant="fp16",
         low_cpu_mem_usage=True,
     )
     svd.enable_model_cpu_offload()
@@ -250,7 +310,7 @@ try:
     current = keyframe
     for n in range(N_CLIPS):
         print(f"Animating clip {n + 1}/{N_CLIPS}...")
-        g = torch.manual_seed(SEED + n)
+        g = torch.Generator("cpu").manual_seed(SEED + n)
         out = svd(
             current,
             num_frames=25,
